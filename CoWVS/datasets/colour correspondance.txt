@@ -1,0 +1,7 @@
+        "ICA":   (0, 0, 255),      # Internal Carotid - Red
+        "ACA":   (0, 255, 0),      # Anterior Cerebral - Green
+        "PCA":   (255, 0, 0),      # Posterior Cerebral - Blue
+        "AComm": (0, 255, 255),    # Anterior Communicating - Yellow-ish
+        "PComm": (0, 165, 255),    # Posterior Communicating - Orange
+        "MCA":   (255, 255, 0),    # Middle Cerebral - Cyan-ish
+        "BA":    (128, 0, 128),    # Basilar - Purple
