@@ -31,17 +31,11 @@ def compute_target_sdf(seg_mask, clip_threshold=10):
         vol = bin_mask[b, 0]
         dt_out = ndi.distance_transform_edt(~vol)    # distance to background
         dt_in = ndi.distance_transform_edt(vol)      # distance to vessel
-        # sdf = np.clip(dt_out - dt_in, -clip_threshold, clip_threshold)
-        # Test without normalizing once it works as might not need to clip at all since normalizing coordinates already
         normalized_sdf = np.clip(dt_out - dt_in, -clip_threshold, clip_threshold) / clip_threshold
         sdf_np[b, 0] = normalized_sdf
-        # neg_count = np.sum(normalized_sdf < 0)
-        # pos_count = np.sum(normalized_sdf >= 0)
-        # total = normalized_sdf.size
-        # print(f"Shape: Negative voxels: {neg_count} ({neg_count/total:.2%}), Positive voxels: {pos_count} ({pos_count/total:.2%})")
     return torch.from_numpy(sdf_np).to(seg_mask.device)
 
-def find_bounding_box(volume, padding=5):
+def find_bounding_box(volume, padding=5, debug_arg=False):
     """
     Computes the tight bounding box of nonzero voxels (vessel)
     and applies extra padding.
@@ -57,79 +51,21 @@ def find_bounding_box(volume, padding=5):
     max_x = min(max_x + padding, volume.shape[0] - 1)
     max_y = min(max_y + padding, volume.shape[1] - 1)
     max_z = min(max_z + padding, volume.shape[2] - 1)
-    print(f"Bounding box: x=({min_x}, {max_x}), y=({min_y}, {max_y}), z=({min_z}, {max_z})")
+    if debug_arg:
+        print(f"Bounding box: x=({min_x}, {max_x}), y=({min_y}, {max_y}), z=({min_z}, {max_z})")
     return (min_x, max_x, min_y, max_y, min_z, max_z)
 
-def crop_volume(volume, bbox):
+def crop_volume(volume, bbox, debug_arg=False):
     """
     Crops the volume using the provided bounding box.
     """
     min_x, max_x, min_y, max_y, min_z, max_z = bbox
     cropped = volume[min_x:max_x+1, min_y:max_y+1, min_z:max_z+1]
-    print(f"Cropped volume shape: {cropped.shape}")
+    if debug_arg:
+        print(f"Cropped volume shape: {cropped.shape}")
     return cropped
 
-# def sample_sdf_balanced(seg_mask, sdf, num_points=25000, band_threshold=4):
-#     """
-#     Samples points exclusively from a narrow band where |SDF| < band_threshold,
-#     and returns a balanced set (equal numbers of negative and non-negative samples).
-    
-#     Args:
-#       seg_mask: torch.Tensor of shape [1, 1, H, W, D]
-#       sdf: torch.Tensor of shape [1, 1, H, W, D]
-#       num_points: Total number of points to sample.
-#       band_threshold: Maximum absolute SDF value for a voxel to be considered in the narrow band.
-    
-#     Returns:
-#       coords: numpy array of shape [num_points, 3] with voxel coordinates.
-#       sdf_samples: numpy array of shape [num_points] with corresponding SDF values.
-#     """
-#     _, _, H, W, D = seg_mask.shape
-#     sdf_np = sdf.squeeze().cpu().numpy()  # shape [H, W, D]
-    
-#     # Create a narrow band mask
-#     band_mask = np.abs(sdf_np) < band_threshold
-#     band_indices = np.argwhere(band_mask)
-#     if len(band_indices) == 0:
-#         raise ValueError("No voxels found in the narrow band. Increase band_threshold.")
-    
-#     band_sdf = sdf_np[band_mask]
-    
-#     # Split into negative (inside vessel) and non-negative (outside)
-#     neg_mask = band_sdf < 0
-#     pos_mask = band_sdf >= 0
-#     neg_indices = band_indices[neg_mask]
-#     pos_indices = band_indices[pos_mask]
-    
-#     if len(neg_indices) == 0 or len(pos_indices) == 0:
-#         raise ValueError("Insufficient negative or positive points in the narrow band.")
-    
-#     half = num_points // 2
-#     selected_neg = neg_indices[np.random.choice(len(neg_indices), size=half, replace=(len(neg_indices) < half))]
-#     selected_pos = pos_indices[np.random.choice(len(pos_indices), size=half, replace=(len(pos_indices) < half))]
-#     selected_coords = np.concatenate([selected_neg, selected_pos], axis=0)
-#     sampled_sdf = sdf_np[selected_coords[:, 0], selected_coords[:, 1], selected_coords[:, 2]]
-    
-#     # Normalize coordinates: map voxel indices to [-1, 1] for each axis.
-#     # For each axis, 0 will map to -1 and (dim - 1) maps to 1.
-#     selected_coords = selected_coords.astype(np.float32)
-#     selected_coords[:, 0] = (selected_coords[:, 0] / (H - 1)) * 2 - 1  # x-axis
-#     selected_coords[:, 1] = (selected_coords[:, 1] / (W - 1)) * 2 - 1  # y-axis
-#     selected_coords[:, 2] = (selected_coords[:, 2] / (D - 1)) * 2 - 1  # z-axis
-
-#     # Debug: Plot histogram of sampled SDF values.
-#     plt.figure()
-#     plt.hist(sampled_sdf, bins=50, color='skyblue', edgecolor='black')
-#     plt.title("Balanced Narrow Band SDF Histogram")
-#     plt.xlabel("SDF value")
-#     plt.ylabel("Frequency")
-#     plt.savefig("balanced_narrow_band_histogram.png", dpi=150)
-#     plt.close()
-#     print("Balanced narrow band histogram saved to balanced_narrow_band_histogram.png")
-    
-#     return selected_coords, sampled_sdf
-
-def sample_sdf_balanced(sdf, num_points, noise_std=0.3):
+def sample_sdf_balanced(sdf, num_points, noise_std=0.3, debug_arg=False):
     """
     Samples points half exactly on the vessel surface (smallest nonzero |SDF|) 
     and half near the surface by applying Gaussian noise to those surface points.
@@ -195,18 +131,19 @@ def sample_sdf_balanced(sdf, num_points, noise_std=0.3):
     sdf_samples = np.concatenate([sdf_surf, sdf_noisy])
 
     # Optional: debug histogram
-    plt.figure()
-    plt.hist(sdf_samples, bins=50, edgecolor='black')
-    plt.title("Surface + Noisy SDF Histogram")
-    plt.xlabel("SDF value")
-    plt.ylabel("Frequency")
-    plt.savefig("surface_noisy_histogram.png", dpi=150)
-    plt.close()
-    print("Histogram saved to surface_noisy_histogram.png")
+    if debug_arg:
+        plt.figure()
+        plt.hist(sdf_samples, bins=50, edgecolor='black')
+        plt.title("Surface + Noisy SDF Histogram")
+        plt.xlabel("SDF value")
+        plt.ylabel("Frequency")
+        plt.savefig("surface_noisy_histogram.png", dpi=150)
+        plt.close()
+        print("Histogram saved to surface_noisy_histogram.png")
 
     return coords_norm, sdf_samples
 
-def process_segmentation(nifti_file, output_folder, num_points, clip_threshold):
+def process_segmentation(nifti_file, output_folder, num_points, clip_threshold, debug_arg):
     """
     Process one segmentation file:
       1. Loads the segmentation.
@@ -221,14 +158,14 @@ def process_segmentation(nifti_file, output_folder, num_points, clip_threshold):
     arr = (arr > 0).astype(np.float32)
     
     # Crop to vessel bounding box
-    bbox = find_bounding_box(arr, padding=10)
-    arr_cropped = crop_volume(arr, bbox)
+    bbox = find_bounding_box(arr, padding=10, debug_arg=debug_arg)
+    arr_cropped = crop_volume(arr, bbox, debug_arg=debug_arg)
     
     seg_tensor = torch.from_numpy(arr_cropped).unsqueeze(0).unsqueeze(0)  # shape [1,1,Hc,Wc,Dc]
     sdf_tensor = compute_target_sdf(seg_tensor, clip_threshold=clip_threshold)
     
     # Sample balanced narrow band points
-    coords, sdf_samples = sample_sdf_balanced(sdf_tensor, num_points=num_points, noise_std=0.3)
+    coords, sdf_samples = sample_sdf_balanced(sdf_tensor, num_points=num_points, noise_std=0.3, debug_arg=debug_arg)
     
     base = os.path.basename(nifti_file)
     name, ext = os.path.splitext(base)
@@ -244,10 +181,11 @@ def main():
     parser.add_argument("--output_folder", required=True, help="Folder to save the npz SDF sample files.")
     parser.add_argument("--num_points", type=int, default=25000, help="Number of SDF sample points per segmentation.")
     parser.add_argument("--clip_threshold", type=float, default=10.0, help="Clipping threshold for SDF values.")
-    parser.add_argument("--latent_dim", type=int, default=512, help="Dimension of latent codes.")
+    parser.add_argument("--latent_dim", type=int, default=256, help="Dimension of latent codes.")
     parser.add_argument("--init_latents", action="store_true", help="If set, initialize latent codes and save them.")
     parser.add_argument("--latent_output", default="latent_codes.npz", help="Output file for latent codes if --init_latents is set.")
     parser.add_argument("--mapping_file", default="mapping.json", help="Output mapping file (segmentation identifier to latent index).")
+    parser.add_argument("--debug", default=False, action="store_true", help="If set, debug mode will be activated.")
     args = parser.parse_args()
 
     os.makedirs(args.output_folder, exist_ok=True)
@@ -256,13 +194,21 @@ def main():
     mapping = {}
     latent_list = []
     
-    for idx, nifti_file in enumerate(tqdm(nifti_files, desc="Processing segmentation masks")):
-        name = process_segmentation(nifti_file, args.output_folder, num_points=args.num_points,
-                                    clip_threshold=args.clip_threshold)
+    n = len(nifti_files)
+    pbar = tqdm(nifti_files, desc="Processing segmentation masks")
+    for idx, nifti_file in enumerate(pbar, start=1):
+        name = process_segmentation(nifti_file,args.output_folder,num_points=args.num_points,
+                                    clip_threshold=args.clip_threshold,debug_arg=args.debug)
         mapping[name] = idx
         if args.init_latents:
-            latent = np.random.normal(0, 1/np.sqrt(args.latent_dim), size=(args.latent_dim,))
+            latent = np.random.normal(
+                0, 1/np.sqrt(args.latent_dim),
+                size=(args.latent_dim,)
+            )
             latent_list.append(latent)
+
+        if idx % 10 == 0:
+            tqdm.write(f"[{idx}/{n}] processed segmentation mask: {nifti_file}")
     
     mapping_path = os.path.join(args.output_folder, args.mapping_file)
     with open(mapping_path, "w") as f:

@@ -35,13 +35,8 @@ def compute_target_sdf(seg_mask, clip_threshold=10):
         vol = bin_mask[b, 0]
         dt_out = ndi.distance_transform_edt(~vol)    # distance to background
         dt_in = ndi.distance_transform_edt(vol)      # distance to vessel
-        # sdf = np.clip(dt_out - dt_in, -clip_threshold, clip_threshold)
         normalized_sdf = np.clip(dt_out - dt_in, -clip_threshold, clip_threshold) / clip_threshold
         sdf_np[b, 0] = normalized_sdf
-        # neg_count = np.sum(normalized_sdf < 0)
-        # pos_count = np.sum(normalized_sdf >= 0)
-        # total = normalized_sdf.size
-        # print(f"Shape {b}: Negative voxels: {neg_count} ({neg_count/total:.2%}), Positive voxels: {pos_count} ({pos_count/total:.2%})")
     return torch.from_numpy(sdf_np).to(seg_mask.device)
 
 def visualize_sdf_slice(decoder, latent_code, seg_mask, slice_idx=None, device="cuda", save_path=None):
@@ -73,9 +68,7 @@ def visualize_sdf_slice(decoder, latent_code, seg_mask, slice_idx=None, device="
     # Ground truth slice for visualization
     target_slice = sdf_gt_np[:, :, slice_idx]
 
-    # -------------------------------------------------------------------------
     # 1) Create grid in the ORIGINAL dimension space: 0..H-1, 0..W-1.
-    # -------------------------------------------------------------------------
     xs = np.arange(H)
     ys = np.arange(W)
     grid_x, grid_y = np.meshgrid(xs, ys, indexing='ij')  # each of shape (H,W)
@@ -85,27 +78,21 @@ def visualize_sdf_slice(decoder, latent_code, seg_mask, slice_idx=None, device="
     # Combine to form 3D coordinates (voxel indices)
     coords_3d = np.concatenate([coords_2d, z_col], axis=-1)  # shape [H*W, 3]
 
-    # -------------------------------------------------------------------------
     # 2) Re-normalize these coordinates into [-1,1] for each axis:
-    # -------------------------------------------------------------------------
     coords_3d_t = torch.from_numpy(coords_3d).float().to(device)
     coords_3d_norm = coords_3d_t.clone()
     coords_3d_norm[:, 0] = coords_3d_norm[:, 0] / max(H - 1, 1) * 2.0 - 1.0
     coords_3d_norm[:, 1] = coords_3d_norm[:, 1] / max(W - 1, 1) * 2.0 - 1.0
     coords_3d_norm[:, 2] = coords_3d_norm[:, 2] / max(D - 1, 1) * 2.0 - 1.0
 
-    # -------------------------------------------------------------------------
     # 3) Feed normalized coordinates to the decoder.
-    # -------------------------------------------------------------------------
     latent_expanded = latent_code.to(device).expand(coords_3d_norm.shape[0], -1)
     inputs = torch.cat([latent_expanded, coords_3d_norm], dim=1)
 
     with torch.no_grad():
         pred_sdf = decoder(inputs).squeeze(1).cpu().numpy().reshape(H, W)
 
-    # -------------------------------------------------------------------------
     # 4) Plot side-by-side: ground truth slice vs. reconstructed slice.
-    # -------------------------------------------------------------------------
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 
     im0 = ax[0].imshow(target_slice, cmap="jet", origin="upper")
@@ -132,9 +119,6 @@ def plot_loss_curve(iteration_loss_log, epoch_loss_log, window=10, save_path="tr
       2) Per-epoch average loss in bold.
       3) Rolling average of per-epoch loss over 'window' epochs, for smoothing.
     """
-    import torch
-
-    # Convert any torch.Tensor entries into Python floats
     iteration_loss_log = [
         x.item() if isinstance(x, torch.Tensor) else float(x)
         for x in iteration_loss_log
@@ -197,3 +181,8 @@ def plot_latent_distribution(lat_vecs, save_path="latent_distribution.png"):
     plt.savefig(save_path, dpi=150)
     plt.close()
     print("Saved latent distribution plot to", save_path)
+    
+def collate_shapes(batch):
+    """Collate function for DataLoader to handle batches of shapes."""
+    shape_idxs, coords_list, sdf_list = zip(*batch)
+    return list(shape_idxs), list(coords_list), list(sdf_list)

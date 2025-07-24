@@ -104,7 +104,5 @@ class Decoder(nn.Module):
 
         if hasattr(self, "th"):
             x = self.th(x)
-        # if self.use_tanh:
-        #     x = self.tanh(x)
 
         return x

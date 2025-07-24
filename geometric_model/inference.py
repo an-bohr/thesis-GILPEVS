@@ -5,7 +5,6 @@ import nibabel as nib
 
 from deep_sdf_decoder import Decoder
 from prepare_sdf_samples import compute_target_sdf, sample_sdf_balanced
-from from_DeepSDF.mesh import create_mesh  # for full‐grid SDF decode (optional)
 
 def load_segmentation(path):
     nii = nib.load(path)

@@ -35,7 +35,7 @@ def optimize_latent(decoder, init_z, seg_t, num_surface=5000, num_interior=5000,
 
     # 2b) Build a flat list of all voxel indices and mask for interior/background
     coords_grid = np.argwhere(np.ones((H,W,D))).astype(np.float32)   # [H*W*D,3]
-    seg_flat = seg_t.squeeze().cpu().numpy().reshape(-1)           # [H*W*D]
+    seg_flat = seg_t.squeeze().cpu().numpy().reshape(-1)             # [H*W*D]
     interior = coords_grid[seg_flat > 0]
     background = coords_grid[seg_flat == 0]
 
@@ -57,11 +57,11 @@ def optimize_latent(decoder, init_z, seg_t, num_surface=5000, num_interior=5000,
     idx_bg = np.random.choice(len(background), num_background, replace=False)
     pts_bg_norm = normalize(background[idx_bg])
     pts_bg = torch.from_numpy(pts_bg_norm).float().to(device)         # [num_background,3]
-    sdf_bg  = torch.abs(torch.randn(num_background, 1, device=device))
+    sdf_bg = torch.abs(torch.randn(num_background, 1, device=device))
 
     # 3) Concatenate once up-front
     coords_all = torch.cat([coords_s, pts_int, pts_bg], dim=0)  # [(num_surf+num_int+num_bg), 3]
-    sdf_all = torch.cat([sdf_s,   sdf_int, sdf_bg],   dim=0)  # [(… ),1]
+    sdf_all = torch.cat([sdf_s, sdf_int, sdf_bg], dim=0)
 
     # 4) Set up latent optimization
     z = init_z.clone().detach().requires_grad_(True)
@@ -106,8 +106,7 @@ def load_model_and_latents(checkpoint_path, latent_size, hidden_dims, device):
     decoder.load_state_dict(ckpt["decoder_state"])
     decoder.eval()
 
-    # 3) Build embedding for latents and load
-    #    `ckpt["latents_state"]` is a dict { "weight": Tensor[...] }
+    # 3) Build embedding for latents and load checkpoint
     num_shapes = ckpt["latents_state"]["weight"].shape[0]
     lat_vecs = torch.nn.Embedding(num_shapes, latent_size).to(device)
     lat_vecs.load_state_dict(ckpt["latents_state"])
@@ -181,14 +180,6 @@ def main():
         nii = nib.load(args.segmentation)
         arr = (nii.get_fdata() > 0).astype(np.float32)
         seg_t = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).to(device)  # [1,1,H,W,D]
-        # sdf_t = compute_target_sdf(seg_t, clip_threshold=10).to(device)     # [1,1,H,W,D]
-
-        # sample points
-        # coords_np, sdf_np = sample_sdf_balanced(sdf_t,
-        #                                         num_points=20000,
-        #                                         noise_std=0.3)
-        # coords = torch.from_numpy(coords_np).float().to(device)
-        # sdf_obs  = torch.from_numpy(sdf_np).float().unsqueeze(1).to(device)
 
         # init latent as zero
         init_z = torch.zeros(1, args.latent_size, device=device)
@@ -209,7 +200,7 @@ def main():
         latent_code = lat_vecs(idx)     # shape [1, latent_size]
 
     # Create the mesh
-    base, ext = args.output.rsplit(".", 1)
+    base, _ = args.output.rsplit(".", 1)
     create_mesh(
         decoder,
         latent_code,
